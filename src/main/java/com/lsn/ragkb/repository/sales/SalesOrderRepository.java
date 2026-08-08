@@ -17,12 +17,29 @@ public interface SalesOrderRepository extends JpaRepository<SalesOrder, Long> {
 
     List<SalesOrder> findByRegionIdAndOrderDateBetween(Long regionId, LocalDate start, LocalDate end);
 
+    @Query("SELECT o FROM SalesOrder o WHERE " +
+            "(:repId IS NULL OR o.repId = :repId) " +
+            "AND (:regionId IS NULL OR o.regionId = :regionId) " +
+            "AND o.orderDate BETWEEN :start AND :end " +
+            "ORDER BY o.orderDate DESC, o.id DESC")
+    List<SalesOrder> findOrders(@Param("repId") Long repId,
+                                @Param("regionId") Long regionId,
+                                @Param("start") LocalDate start,
+                                @Param("end") LocalDate end);
+
     @Query("SELECT COALESCE(SUM(o.amount), 0) FROM SalesOrder o " +
             "WHERE (:regionId IS NULL OR o.regionId = :regionId) " +
             "AND o.status = 'COMPLETED' AND o.orderDate BETWEEN :start AND :end")
     BigDecimal sumAmount(@Param("regionId") Long regionId,
                          @Param("start") LocalDate start,
                          @Param("end") LocalDate end);
+
+    @Query("SELECT COUNT(o) FROM SalesOrder o " +
+            "WHERE (:regionId IS NULL OR o.regionId = :regionId) " +
+            "AND o.status = 'COMPLETED' AND o.orderDate BETWEEN :start AND :end")
+    long countCompleted(@Param("regionId") Long regionId,
+                        @Param("start") LocalDate start,
+                        @Param("end") LocalDate end);
 
     @Query("SELECT COALESCE(SUM(o.amount), 0) FROM SalesOrder o " +
             "WHERE o.repId = :repId AND o.status = 'COMPLETED' " +

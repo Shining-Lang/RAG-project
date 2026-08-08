@@ -14,5 +14,6 @@ public class SalesAgentResponse {
     private String salesContext;
     private String knowledgeAnswer;
     private List<RagResponse.Source> sources;
+    private List<String> toolTraces;
     private int latencyMs;
 }

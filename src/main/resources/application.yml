@@ -72,6 +72,21 @@ spring:
       time-to-live: 600000    # 10 分钟
       cache-null-values: false
 
+langchain4j:
+  open-ai:
+    chat-model:
+      base-url: ${OPENAI_COMPATIBLE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+      api-key: ${DASHSCOPE_API_KEY:}
+      model-name: ${LLM_MODEL_NAME:qwen-plus}
+      temperature: 0.1
+      max-tokens: 2048
+    streaming-chat-model:
+      base-url: ${OPENAI_COMPATIBLE_BASE_URL:https://dashscope.aliyuncs.com/compatible-mode/v1}
+      api-key: ${DASHSCOPE_API_KEY:}
+      model-name: ${LLM_MODEL_NAME:qwen-plus}
+      temperature: 0.1
+      max-tokens: 2048
+
 # ========== MinIO ==========
 minio:
   endpoint: ${MINIO_ENDPOINT:http://localhost:9000}

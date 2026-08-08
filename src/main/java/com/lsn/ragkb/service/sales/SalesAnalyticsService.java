@@ -1,7 +1,12 @@
 package com.lsn.ragkb.service.sales;
 
-import com.lsn.ragkb.dto.sales.*;
+import com.lsn.ragkb.dto.sales.AnomalyDTO;
+import com.lsn.ragkb.dto.sales.MonthlyTrendDTO;
+import com.lsn.ragkb.dto.sales.ProductSalesDTO;
+import com.lsn.ragkb.dto.sales.RegionSalesDTO;
+import com.lsn.ragkb.dto.sales.RepSalesDTO;
 import com.lsn.ragkb.entity.sales.Product;
+import com.lsn.ragkb.entity.sales.SalesOrder;
 import com.lsn.ragkb.entity.sales.SalesRegion;
 import com.lsn.ragkb.entity.sales.SalesRep;
 import com.lsn.ragkb.repository.sales.ProductRepository;
@@ -20,6 +25,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 @Service
@@ -33,17 +39,17 @@ public class SalesAnalyticsService {
 
     public String buildContext(String question) {
         LocalDateRange range = resolveRange(question);
-        String normalized = question == null ? "" : question.toLowerCase();
+        String normalized = question == null ? "" : question.toLowerCase(Locale.ROOT);
         List<String> blocks = new ArrayList<>();
 
         if (matchesAny(normalized, "top", "排名", "销售员", "冠军", "谁卖")) {
-            blocks.add(formatRepRanking(range.start(), range.end(), 5));
+            blocks.add(formatRepRanking(range.start(), range.end(), 5, null));
         }
         if (matchesAny(normalized, "大区", "区域", "地区")) {
             blocks.add(formatRegionRanking(range.start(), range.end()));
         }
         if (matchesAny(normalized, "产品", "sku", "商品", "畅销", "滞销")) {
-            blocks.add(formatProductRanking(range.start(), range.end(), 5));
+            blocks.add(formatProductRanking(range.start(), range.end(), 5, false));
         }
         if (matchesAny(normalized, "趋势", "月份", "环比", "走势")) {
             blocks.add(formatMonthlyTrend(null, 6));
@@ -63,16 +69,43 @@ public class SalesAnalyticsService {
 
     public String formatSalesSummary(Long regionId, LocalDate start, LocalDate end) {
         BigDecimal total = orderRepository.sumAmount(regionId, start, end);
+        long count = orderRepository.countCompleted(regionId, start, end);
         String scope = regionId == null ? "全公司" : getRegionName(regionId);
         return """
                 【销售汇总】
                 范围：%s，%s 至 %s
                 成交销售额：%s
-                """.formatted(scope, start, end, money(total)).strip();
+                成交订单数：%d 单
+                """.formatted(scope, start, end, money(total), count).strip();
     }
 
-    public String formatRepRanking(LocalDate start, LocalDate end, int topN) {
-        List<RepSalesDTO> reps = queryRepRanking(start, end).stream().limit(topN).toList();
+    public String formatOrderList(Long repId, Long regionId, LocalDate start, LocalDate end, int limit) {
+        List<SalesOrder> orders = orderRepository.findOrders(repId, regionId, start, end)
+                .stream()
+                .limit(limit)
+                .toList();
+        if (orders.isEmpty()) {
+            return "该时间段暂无符合条件的订单。";
+        }
+        StringBuilder sb = new StringBuilder("【订单明细】\n");
+        sb.append("时间：").append(start).append(" 至 ").append(end).append("\n");
+        for (SalesOrder order : orders) {
+            sb.append("- 订单号：").append(order.getOrderNo())
+                    .append("，日期：").append(order.getOrderDate())
+                    .append("，销售员：").append(getRepName(order.getRepId()))
+                    .append("，客户：").append(order.getCustomerName())
+                    .append("，金额：").append(money(order.getAmount()))
+                    .append("，状态：").append(translateStatus(order.getStatus()))
+                    .append("\n");
+        }
+        return sb.toString().strip();
+    }
+
+    public String formatRepRanking(LocalDate start, LocalDate end, int topN, Long regionId) {
+        List<RepSalesDTO> reps = queryRepRanking(start, end).stream()
+                .filter(rep -> regionId == null || regionId.equals(rep.regionId()))
+                .limit(topN)
+                .toList();
         if (reps.isEmpty()) {
             return "【销售员排名】该时间段暂无成交订单。";
         }
@@ -113,18 +146,24 @@ public class SalesAnalyticsService {
         return sb.toString().strip();
     }
 
-    public String formatProductRanking(LocalDate start, LocalDate end, int topN) {
-        List<ProductSalesDTO> products = queryProductRanking(start, end).stream().limit(topN).toList();
+    public String formatProductRanking(LocalDate start, LocalDate end, int topN, boolean worst) {
+        List<ProductSalesDTO> products = new ArrayList<>(queryProductRanking(start, end));
         if (products.isEmpty()) {
             return "【产品排名】该时间段暂无成交订单。";
         }
-        StringBuilder sb = new StringBuilder("【产品销售排名】\n");
+        if (worst) {
+            products.sort(Comparator.comparing(ProductSalesDTO::totalAmount));
+        }
+        products = products.stream().limit(topN).toList();
+
+        StringBuilder sb = new StringBuilder(worst ? "【滞销产品排名】\n" : "【产品销售排名】\n");
         sb.append("时间：").append(start).append(" 至 ").append(end).append("\n");
         for (int i = 0; i < products.size(); i++) {
             ProductSalesDTO p = products.get(i);
             sb.append(i + 1).append(". ")
                     .append(p.productName()).append(" [").append(p.skuCode()).append("]")
-                    .append(" 销售额 ").append(money(p.totalAmount()))
+                    .append("，品类 ").append(p.category())
+                    .append("，销售额 ").append(money(p.totalAmount()))
                     .append("，销量 ").append(p.totalQuantity()).append(" 件\n");
         }
         return sb.toString().strip();
@@ -133,12 +172,7 @@ public class SalesAnalyticsService {
     public String formatMonthlyTrend(Long regionId, int months) {
         LocalDate end = LocalDate.now();
         LocalDate start = end.minusMonths(months).withDayOfMonth(1);
-        List<MonthlyTrendDTO> trend = orderRepository.findMonthlyTrend(regionId, start, end).stream()
-                .map(row -> new MonthlyTrendDTO(
-                        row[0].toString(),
-                        new BigDecimal(row[1].toString()),
-                        ((Number) row[2]).intValue()))
-                .toList();
+        List<MonthlyTrendDTO> trend = queryMonthlyTrend(regionId, start, end);
         if (trend.isEmpty()) {
             return "【月度趋势】暂无趋势数据。";
         }
@@ -161,6 +195,37 @@ public class SalesAnalyticsService {
         return sb.toString().strip();
     }
 
+    public String formatGrowthComparison(LocalDate currentStart, LocalDate currentEnd,
+                                         LocalDate previousStart, LocalDate previousEnd,
+                                         Long regionId, String label) {
+        BigDecimal current = orderRepository.sumAmount(regionId, currentStart, currentEnd);
+        BigDecimal previous = orderRepository.sumAmount(regionId, previousStart, previousEnd);
+        BigDecimal rate = growthRate(current, previous);
+        String scope = regionId == null ? "全公司" : getRegionName(regionId);
+        if (rate == null) {
+            return """
+                    【%s】
+                    范围：%s
+                    当前周期：%s 至 %s，销售额 %s
+                    对比周期：%s 至 %s，销售额 %s
+                    对比周期无销售额，无法计算增长率。
+                    """.formatted(label, scope, currentStart, currentEnd, money(current),
+                    previousStart, previousEnd, money(previous)).strip();
+        }
+        return """
+                【%s】
+                范围：%s
+                当前周期：%s 至 %s，销售额 %s
+                对比周期：%s 至 %s，销售额 %s
+                变化：%s %s%%，金额%s %s
+                """.formatted(label, scope, currentStart, currentEnd, money(current),
+                previousStart, previousEnd, money(previous),
+                rate.compareTo(BigDecimal.ZERO) >= 0 ? "增长" : "下降",
+                rate.abs(),
+                rate.compareTo(BigDecimal.ZERO) >= 0 ? "增加" : "减少",
+                money(current.subtract(previous).abs())).strip();
+    }
+
     public String formatAnomalies() {
         List<AnomalyDTO> anomalies = detectAnomalies();
         if (anomalies.isEmpty()) {
@@ -176,7 +241,16 @@ public class SalesAnalyticsService {
         return sb.toString().strip();
     }
 
-    private List<RepSalesDTO> queryRepRanking(LocalDate start, LocalDate end) {
+    public List<MonthlyTrendDTO> queryMonthlyTrend(Long regionId, LocalDate start, LocalDate end) {
+        return orderRepository.findMonthlyTrend(regionId, start, end).stream()
+                .map(row -> new MonthlyTrendDTO(
+                        row[0].toString(),
+                        new BigDecimal(row[1].toString()),
+                        ((Number) row[2]).intValue()))
+                .toList();
+    }
+
+    public List<RepSalesDTO> queryRepRanking(LocalDate start, LocalDate end) {
         Map<Long, SalesRep> reps = repRepository.findAll().stream()
                 .collect(Collectors.toMap(SalesRep::getId, r -> r));
         Map<Long, String> regions = regionRepository.findAll().stream()
@@ -199,7 +273,7 @@ public class SalesAnalyticsService {
                 .toList();
     }
 
-    private List<RegionSalesDTO> queryRegionRanking(LocalDate start, LocalDate end) {
+    public List<RegionSalesDTO> queryRegionRanking(LocalDate start, LocalDate end) {
         Map<Long, String> regions = regionRepository.findAll().stream()
                 .collect(Collectors.toMap(SalesRegion::getId, SalesRegion::getName));
         return orderRepository.findRegionRanking(start, end).stream()
@@ -215,7 +289,7 @@ public class SalesAnalyticsService {
                 .toList();
     }
 
-    private List<ProductSalesDTO> queryProductRanking(LocalDate start, LocalDate end) {
+    public List<ProductSalesDTO> queryProductRanking(LocalDate start, LocalDate end) {
         Map<Long, Product> products = productRepository.findAll().stream()
                 .collect(Collectors.toMap(Product::getId, p -> p));
         return orderRepository.findProductRanking(start, end).stream()
@@ -233,6 +307,56 @@ public class SalesAnalyticsService {
                 })
                 .filter(java.util.Objects::nonNull)
                 .toList();
+    }
+
+    public Optional<Long> findRegionIdByName(String regionName) {
+        if (regionName == null || regionName.isBlank()) {
+            return Optional.empty();
+        }
+        return regionRepository.findAll().stream()
+                .filter(region -> regionName.trim().equals(region.getName()))
+                .map(SalesRegion::getId)
+                .findFirst();
+    }
+
+    public Optional<Long> findRepIdByName(String repName) {
+        if (repName == null || repName.isBlank()) {
+            return Optional.empty();
+        }
+        return repRepository.findAll().stream()
+                .filter(rep -> repName.trim().equals(rep.getName()))
+                .map(SalesRep::getId)
+                .findFirst();
+    }
+
+    public LocalDateRange resolveRange(String question) {
+        LocalDate today = LocalDate.now();
+        String q = question == null ? "" : question;
+        if (q.contains("本月")) {
+            return new LocalDateRange(today.withDayOfMonth(1), today);
+        }
+        if (q.contains("本季度") || q.contains("季度")) {
+            int firstMonth = ((today.getMonthValue() - 1) / 3) * 3 + 1;
+            LocalDate start = LocalDate.of(today.getYear(), firstMonth, 1);
+            return new LocalDateRange(start, today);
+        }
+        if (q.contains("今年")) {
+            return new LocalDateRange(LocalDate.of(today.getYear(), 1, 1), today);
+        }
+        if (q.contains("近30天") || q.contains("最近30天")) {
+            return new LocalDateRange(today.minusDays(30), today);
+        }
+        return new LocalDateRange(today.minusMonths(3), today);
+    }
+
+    public BigDecimal growthRate(BigDecimal current, BigDecimal previous) {
+        if (previous == null || previous.compareTo(BigDecimal.ZERO) == 0) {
+            return null;
+        }
+        return current.subtract(previous)
+                .divide(previous, 4, RoundingMode.HALF_UP)
+                .multiply(BigDecimal.valueOf(100))
+                .setScale(1, RoundingMode.HALF_UP);
     }
 
     private List<AnomalyDTO> detectAnomalies() {
@@ -255,8 +379,8 @@ public class SalesAnalyticsService {
                             drop > 0.6 ? "HIGH" : "MEDIUM",
                             region.getName(),
                             "近 14 天订单 " + recent + " 单，过去 4 周折算均值 "
-                                    + String.format("%.1f", baseAvg) + " 单/两周，下降 "
-                                    + String.format("%.0f", drop * 100) + "%",
+                                    + String.format(Locale.US, "%.1f", baseAvg) + " 单/两周，下降 "
+                                    + String.format(Locale.US, "%.0f", drop * 100) + "%",
                             "联系大区负责人复盘线索、库存、渠道活动与竞品冲击。"));
                 }
             }
@@ -288,7 +412,7 @@ public class SalesAnalyticsService {
                         "销售员退单率偏高",
                         rate > 0.3 ? "HIGH" : "MEDIUM",
                         getRepName(repId),
-                        "近 90 天退单率 " + String.format("%.0f", rate * 100) + "%（"
+                        "近 90 天退单率 " + String.format(Locale.US, "%.0f", rate * 100) + "%（"
                                 + refunded + "/" + total + " 单）",
                         "抽查成交承诺、客户画像匹配度和售后原因，必要时调整激励口径。"));
             }
@@ -299,39 +423,9 @@ public class SalesAnalyticsService {
                 .toList();
     }
 
-    private LocalDateRange resolveRange(String question) {
-        LocalDate today = LocalDate.now();
-        String q = question == null ? "" : question;
-        if (q.contains("本月")) {
-            return new LocalDateRange(today.withDayOfMonth(1), today);
-        }
-        if (q.contains("本季度") || q.contains("季度")) {
-            int firstMonth = ((today.getMonthValue() - 1) / 3) * 3 + 1;
-            LocalDate start = LocalDate.of(today.getYear(), firstMonth, 1);
-            return new LocalDateRange(start, today);
-        }
-        if (q.contains("今年")) {
-            return new LocalDateRange(LocalDate.of(today.getYear(), 1, 1), today);
-        }
-        if (q.contains("近30天") || q.contains("最近30天")) {
-            return new LocalDateRange(today.minusDays(30), today);
-        }
-        return new LocalDateRange(today.minusMonths(3), today);
-    }
-
-    private BigDecimal growthRate(BigDecimal current, BigDecimal previous) {
-        if (previous == null || previous.compareTo(BigDecimal.ZERO) == 0) {
-            return null;
-        }
-        return current.subtract(previous)
-                .divide(previous, 4, RoundingMode.HALF_UP)
-                .multiply(BigDecimal.valueOf(100))
-                .setScale(1, RoundingMode.HALF_UP);
-    }
-
     private boolean matchesAny(String text, String... keys) {
         for (String key : keys) {
-            if (text.contains(key.toLowerCase())) {
+            if (text.contains(key.toLowerCase(Locale.ROOT))) {
                 return true;
             }
         }
@@ -346,10 +440,19 @@ public class SalesAnalyticsService {
         return regionRepository.findById(regionId).map(SalesRegion::getName).orElse("未知大区");
     }
 
-    private String money(BigDecimal amount) {
+    public String money(BigDecimal amount) {
         BigDecimal value = amount == null ? BigDecimal.ZERO : amount;
         return "¥" + String.format(Locale.US, "%,.0f", value);
     }
 
-    private record LocalDateRange(LocalDate start, LocalDate end) {}
+    private String translateStatus(String status) {
+        return switch (status) {
+            case "COMPLETED" -> "已完成";
+            case "REFUNDED" -> "已退款";
+            case "CANCELLED" -> "已取消";
+            default -> status;
+        };
+    }
+
+    public record LocalDateRange(LocalDate start, LocalDate end) {}
 }
