@@ -2,7 +2,7 @@ package com.lsn.ragkb.config;
 
 import com.lsn.ragkb.entity.KbDocument;
 import com.lsn.ragkb.repository.KbDocumentRepository;
-import com.lsn.ragkb.service.IndexService;
+import com.lsn.ragkb.service.index.IndexService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;

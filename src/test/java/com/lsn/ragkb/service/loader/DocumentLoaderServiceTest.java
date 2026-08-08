@@ -1,6 +1,7 @@
 package com.lsn.ragkb.service.loader;
 
-import com.lsn.ragkb.service.DocumentLoaderService;
+import com.lsn.ragkb.service.document.DocumentLoaderService;
+import com.lsn.ragkb.service.document.loader.ParseResult;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;

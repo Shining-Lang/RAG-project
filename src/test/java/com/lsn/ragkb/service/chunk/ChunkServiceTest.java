@@ -1,8 +1,8 @@
 package com.lsn.ragkb.service.chunk;
 
-import com.lsn.ragkb.service.ChunkService;
-import com.lsn.ragkb.service.loader.ParseResult;
-import com.lsn.ragkb.service.splitter.ChunkResult;
+import com.lsn.ragkb.service.document.ChunkService;
+import com.lsn.ragkb.service.document.loader.ParseResult;
+import com.lsn.ragkb.service.document.splitter.ChunkResult;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;

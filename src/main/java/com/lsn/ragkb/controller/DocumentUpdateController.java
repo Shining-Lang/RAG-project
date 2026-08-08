@@ -2,8 +2,8 @@ package com.lsn.ragkb.controller;
 
 import com.lsn.ragkb.dto.ApiResponse;
 import com.lsn.ragkb.entity.KbDocument;
-import com.lsn.ragkb.service.DocumentUpdateService;
-import com.lsn.ragkb.service.PermissionService;
+import com.lsn.ragkb.service.document.DocumentUpdateService;
+import com.lsn.ragkb.service.knowledge.PermissionService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;

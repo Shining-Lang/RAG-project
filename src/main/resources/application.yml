@@ -66,6 +66,12 @@ spring:
         options:
           model: text-embedding-v3
 
+  cache:
+    type: redis
+    redis:
+      time-to-live: 600000    # 10 分钟
+      cache-null-values: false
+
 # ========== MinIO ==========
 minio:
   endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
