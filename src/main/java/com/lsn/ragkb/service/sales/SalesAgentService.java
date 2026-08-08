@@ -6,6 +6,7 @@ import com.lsn.ragkb.dto.sales.SalesAgentRequest;
 import com.lsn.ragkb.dto.sales.SalesAgentResponse;
 import com.lsn.ragkb.security.UserContext;
 import com.lsn.ragkb.service.chat.ChatSessionService;
+import com.lsn.ragkb.service.monitoring.ObservabilityMetrics;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -26,6 +27,7 @@ public class SalesAgentService {
     private final SalesAgentRequestContext requestContext;
     private final ChatSessionService sessionService;
     private final ObjectMapper objectMapper;
+    private final ObservabilityMetrics metrics;
 
     public SalesAgentResponse chat(SalesAgentRequest request) {
         long start = System.currentTimeMillis();
@@ -42,6 +44,7 @@ public class SalesAgentService {
                     LocalDate.now().toString(),
                     kbIds.isEmpty() ? "未传入知识库 ID" : kbIds.toString());
             int latencyMs = (int) (System.currentTimeMillis() - start);
+            metrics.recordSalesAgentChat("LANGCHAIN4J_TOOL_AGENT", "success", latencyMs);
             List<String> toolTraces = requestContext.toolTraces();
             sessionService.saveMessage(sessionId, question, answer, sourcesJson(toolTraces), latencyMs);
 
@@ -59,6 +62,7 @@ public class SalesAgentService {
             log.warn("[SalesAgent] LangChain4j agent degraded: {}", e.getMessage());
             String fallback = analyticsService.buildContext(question);
             int latencyMs = (int) (System.currentTimeMillis() - start);
+            metrics.recordSalesAgentChat("FALLBACK_SALES_ANALYTICS", "degraded", latencyMs);
             sessionService.saveMessage(sessionId, question, fallback, "[]", latencyMs);
 
             return SalesAgentResponse.builder()

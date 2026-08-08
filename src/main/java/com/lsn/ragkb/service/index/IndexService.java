@@ -8,6 +8,7 @@ import com.lsn.ragkb.service.document.DocumentLoaderService;
 import com.lsn.ragkb.service.document.loader.ParseResult;
 import com.lsn.ragkb.service.document.splitter.ChunkResult;
 import com.lsn.ragkb.service.embedding.EmbeddingService;
+import com.lsn.ragkb.service.monitoring.ObservabilityMetrics;
 import com.lsn.ragkb.service.storage.MinioStorageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -40,7 +41,8 @@ public class IndexService {
     private final ChunkService chunkService;
     private final EmbeddingService embeddingService;
     private final MinioStorageService minioStorageService;
-    private final IndexTaskLauncher taskLauncher;   // 后面会讲为什么要抽出这个类
+    private final IndexTaskDispatcher taskDispatcher;
+    private final ObservabilityMetrics metrics;
 
     /**
      * 重试调度器：单线程、daemon——专用于"延迟到时间后把任务重新投递到 indexTaskExecutor"。
@@ -67,9 +69,10 @@ public class IndexService {
         task.setDocId(docId);
         task.setTaskType(TASK_TYPE_FROM_TEXT);   // ★ 区分入口——scheduleRetry 据此跳过文本任务
         taskRepository.save(task);
+        metrics.recordIndexTaskSubmitted(TASK_TYPE_FROM_TEXT, "local");
 
         // 捕获当前用户上下文，传递给异步线程（ThreadLocal 不能跨线程）
-        taskLauncher.launchWithText(task.getId(), docId, textContent,
+        taskDispatcher.dispatchWithText(task.getId(), docId, textContent,
                 UserContext.getUserId(), UserContext.getDepartmentId(), UserContext.getRole());
     }
 
@@ -81,13 +84,14 @@ public class IndexService {
         task.setDocId(docId);
         task.setTaskType(TASK_TYPE_FROM_MINIO);  // ★ 区分入口——scheduleRetry 才能正确地走 MinIO 路径
         taskRepository.save(task);
+        metrics.recordIndexTaskSubmitted(TASK_TYPE_FROM_MINIO, "dispatcher");
 
-        taskLauncher.launchFromMinio(task.getId(), docId,
+        taskDispatcher.dispatchFromMinio(task.getId(), docId,
                 UserContext.getUserId(), UserContext.getDepartmentId(), UserContext.getRole());
     }
 
     /**
-     * 从 MinIO 读取文件并执行索引（由 IndexTaskLauncher 异步调用）。
+     * 从 MinIO 读取文件并执行索引（由本地异步执行器或 Kafka 消费者调用）。
      *
      * 分阶段 try-catch 的理由：
      *   → 文档不存在：是数据被并发删除的脏请求，重试也没用，直接 markFailed 终止
@@ -129,7 +133,7 @@ public class IndexService {
     }
 
     /**
-     * 执行索引（直接使用文本内容，由 IndexTaskLauncher 异步调用）。
+     * 执行索引（直接使用文本内容，由本地异步执行器调用）。
      * 注意：文本任务失败后**不能自动重试**——文本只在内存里，重启就丢，scheduleRetry 会跳过这种 task。
      */
     public void executeWithText(Long taskId, Long docId, String textContent) {
@@ -262,6 +266,7 @@ public class IndexService {
         task.setErrorMsg(errorMsg);
         task.setFinishedAt(LocalDateTime.now());
         taskRepository.save(task);
+        metrics.recordIndexTaskFinished("failed");
 
         documentRepository.findById(docId).ifPresent(doc -> {
             doc.setStatus(KbDocument.DocumentStatus.FAILED);
@@ -288,7 +293,7 @@ public class IndexService {
      * 关键设计：
      *   1. 用独立的 retryScheduler 延迟、**不在 indexTaskExecutor 线程里 Thread.sleep**——
      *      否则多个失败任务并发 sleep 会把索引线程池整体阻塞。
-     *   2. 时间到了通过 taskLauncher 把任务**重新投递到 indexTaskExecutor**——
+     *   2. 时间到了通过 dispatcher 把任务重新投递——
      *      走 @Async 代理，UserContext 在新线程里重新 set。
      *   3. 根据 task.taskType **正确选择重投入口**——
      *      MinIO 任务走 launchFromMinio，文本任务（文本只在内存里）直接放弃自动重试。
@@ -315,9 +320,9 @@ public class IndexService {
 
         retryScheduler.schedule(() -> {
             try {
-                // ★ 通过 taskLauncher 重新投递——走 @Async 代理 → indexTaskExecutor 起新线程
+                // ★ 通过 dispatcher 重新投递：本地模式走 @Async，Kafka 模式重新发消息。
                 //   不要直接 executeFromMinio()，否则会跑在 retryScheduler 的单线程上
-                taskLauncher.launchFromMinio(taskId, docId, userId, departmentId, role);
+                taskDispatcher.dispatchFromMinio(taskId, docId, userId, departmentId, role);
             } catch (Exception e) {
                 log.error("[IndexService] 重投递任务失败：taskId={}, err={}", taskId, e.getMessage(), e);
             }
@@ -328,7 +333,10 @@ public class IndexService {
         taskRepository.findById(taskId).ifPresent(t -> {
             t.setStatus(status);
             if (status == IndexTask.TaskStatus.RUNNING) t.setStartedAt(LocalDateTime.now());
-            if (status == IndexTask.TaskStatus.DONE)    t.setFinishedAt(LocalDateTime.now());
+            if (status == IndexTask.TaskStatus.DONE) {
+                t.setFinishedAt(LocalDateTime.now());
+                metrics.recordIndexTaskFinished("done");
+            }
             taskRepository.save(t);
         });
     }

@@ -1,0 +1,268 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: #eef2f7;
+  color: #111827;
+}
+
+.app-shell {
+  min-height: 100vh;
+}
+
+.brand {
+  height: 72px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.brand-mark {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: #2563eb;
+  color: white;
+  font-weight: 800;
+  font-size: 14px;
+}
+
+.brand-title {
+  color: #f9fafb;
+  font-weight: 700;
+}
+
+.brand-subtitle {
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.topbar {
+  height: 64px;
+  padding: 0 24px;
+  background: rgba(255, 255, 255, 0.92);
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.content {
+  padding: 24px;
+  overflow: auto;
+}
+
+.page-stack {
+  max-width: 1440px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.page-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.page-heading h2 {
+  margin: 0 0 4px;
+}
+
+.stat-foot {
+  margin-top: 12px;
+  color: #6b7280;
+  min-height: 24px;
+}
+
+.pipeline {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.pipeline-step {
+  min-height: 64px;
+  border: 1px solid #dbe4f0;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f8fafc;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+}
+
+.kb-select {
+  min-width: 280px;
+}
+
+.kb-multi {
+  min-width: 360px;
+}
+
+.chat-card {
+  min-height: 420px;
+}
+
+.chat-row {
+  border: none !important;
+}
+
+.chat-row.user {
+  justify-content: flex-end;
+}
+
+.bubble {
+  width: min(880px, 100%);
+  border: 1px solid #dbe4f0;
+  border-radius: 8px;
+  padding: 14px;
+  background: #ffffff;
+}
+
+.chat-row.user .bubble {
+  background: #eff6ff;
+  border-color: #bfdbfe;
+}
+
+.bubble-head {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.answer-text {
+  white-space: pre-wrap;
+  margin-bottom: 0 !important;
+}
+
+.source-card {
+  background: #f8fafc;
+}
+
+.composer {
+  display: grid;
+  grid-template-columns: 1fr 48px;
+  gap: 10px;
+  position: sticky;
+  bottom: 0;
+  padding: 12px;
+  border: 1px solid #dbe4f0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.pre-wrap {
+  white-space: pre-wrap;
+}
+
+.login-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(360px, 440px);
+  background:
+    linear-gradient(135deg, rgba(37, 99, 235, 0.08), transparent 36%),
+    linear-gradient(315deg, rgba(5, 150, 105, 0.1), transparent 32%),
+    #f8fafc;
+}
+
+.login-visual {
+  padding: 72px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.login-visual h1 {
+  font-size: 48px;
+  max-width: 720px;
+}
+
+.login-visual p {
+  max-width: 620px;
+  font-size: 18px;
+  color: #475569;
+}
+
+.login-card {
+  align-self: center;
+  margin-right: 72px;
+}
+
+.signal-grid {
+  width: 320px;
+  height: 180px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  align-items: end;
+  gap: 12px;
+  margin-bottom: 32px;
+}
+
+.signal-node {
+  border-radius: 8px 8px 0 0;
+  background: #2563eb;
+  min-height: 70px;
+}
+
+.signal-node.primary {
+  height: 160px;
+}
+
+.signal-node.green {
+  height: 116px;
+  background: #059669;
+}
+
+.signal-node.amber {
+  height: 138px;
+  background: #d97706;
+}
+
+.signal-node.red {
+  height: 90px;
+  background: #dc2626;
+}
+
+@media (max-width: 900px) {
+  .login-shell {
+    grid-template-columns: 1fr;
+    padding: 24px;
+  }
+
+  .login-visual {
+    padding: 32px 0 12px;
+  }
+
+  .login-visual h1 {
+    font-size: 34px;
+  }
+
+  .login-card {
+    margin: 0;
+  }
+
+  .content {
+    padding: 16px;
+  }
+
+  .page-heading {
+    flex-direction: column;
+  }
+
+  .kb-select,
+  .kb-multi {
+    min-width: 100%;
+  }
+}

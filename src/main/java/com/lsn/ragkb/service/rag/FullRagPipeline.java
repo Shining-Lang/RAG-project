@@ -1,6 +1,7 @@
 package com.lsn.ragkb.service.rag;
 
 import com.lsn.ragkb.dto.RagResponse;
+import com.lsn.ragkb.service.monitoring.ObservabilityMetrics;
 import com.lsn.ragkb.service.rag.filter.ConfidenceFilter;
 import com.lsn.ragkb.service.token.ContextTrimmerService;
 import com.lsn.ragkb.template.RagPromptTemplate;
@@ -24,6 +25,7 @@ public class FullRagPipeline {
     private final SourceBuilder sourceBuilder;
     private final HallucinationChecker hallucinationChecker;
     private final ChatClient chatClient;
+    private final ObservabilityMetrics metrics;
 
     @Value("${reranker.top-n:5}")
     private int rerankerTopN;
@@ -31,53 +33,52 @@ public class FullRagPipeline {
     public RagResponse query(String question, List<Long> kbIds) {
         long pipelineStart = System.currentTimeMillis();
 
-        // Step 1：增强检索（混合检索 + HyDE）
-        List<HybridRetrieverService.ScoredChunk> candidates =
-                enhancedRetriever.retrieveWithHyde(question, kbIds, 20);
+        try {
+            List<HybridRetrieverService.ScoredChunk> candidates =
+                    enhancedRetriever.retrieveWithHyde(question, kbIds, 20);
 
-        if (candidates.isEmpty()) {
-            return RagResponse.notFound();
-        }
-
-        // Step 2：Reranker 精排
-        List<HybridRetrieverService.ScoredChunk> reranked =
-                rerankerService.rerank(question, candidates, rerankerTopN);
-
-        // Step 3：置信度过滤
-        List<HybridRetrieverService.ScoredChunk> filtered = confidenceFilter.filter(reranked);
-
-        if (filtered.isEmpty()) {
-            return RagResponse.notFound();
-        }
-
-        // Step 4：上下文裁剪（控制 Token 预算）
-        List<HybridRetrieverService.ScoredChunk> trimmed = contextTrimmer.trim(filtered);
-
-        // Step 5：构建带引用编号的 context + 用 RagPromptTemplate 生成 System Prompt
-        String context = buildContext(trimmed);
-        String answer = generateAnswer(question, context, trimmed.size());
-
-        // Step 6：用 SourceBuilder 解析引用标注，关联到文档信息
-        List<RagResponse.Source> sources = sourceBuilder.buildSources(answer, trimmed);
-
-        // Step 7：幻觉检测（抽样监控；检测不通过先记日志）
-        if (System.currentTimeMillis() % 5 == 0) {
-            var faithResult = hallucinationChecker.check(question, answer, context);
-            if (!faithResult.isFaithful()) {
-                log.warn("[FullRagPipeline] 幻觉检测不通过：score={}，reason={}",
-                        faithResult.score(), faithResult.reason());
+            if (candidates.isEmpty()) {
+                metrics.recordRagQuery("not_found", System.currentTimeMillis() - pipelineStart, 0);
+                return RagResponse.notFound();
             }
+
+            List<HybridRetrieverService.ScoredChunk> reranked =
+                    rerankerService.rerank(question, candidates, rerankerTopN);
+
+            List<HybridRetrieverService.ScoredChunk> filtered = confidenceFilter.filter(reranked);
+
+            if (filtered.isEmpty()) {
+                metrics.recordRagQuery("filtered", System.currentTimeMillis() - pipelineStart, 0);
+                return RagResponse.notFound();
+            }
+
+            List<HybridRetrieverService.ScoredChunk> trimmed = contextTrimmer.trim(filtered);
+            String context = buildContext(trimmed);
+            String answer = generateAnswer(question, context, trimmed.size());
+            List<RagResponse.Source> sources = sourceBuilder.buildSources(answer, trimmed);
+
+            if (System.currentTimeMillis() % 5 == 0) {
+                var faithResult = hallucinationChecker.check(question, answer, context);
+                if (!faithResult.isFaithful()) {
+                    log.warn("[FullRagPipeline] hallucination check failed: score={}, reason={}",
+                            faithResult.score(), faithResult.reason());
+                }
+            }
+
+            long elapsed = System.currentTimeMillis() - pipelineStart;
+            metrics.recordRagQuery("success", elapsed, sources.size());
+            log.info("[FullRagPipeline] completed: question={}, elapsed={}ms, sources={}",
+                    question.substring(0, Math.min(30, question.length())), elapsed, sources.size());
+
+            return RagResponse.builder()
+                    .answer(answer)
+                    .sources(sources)
+                    .latencyMs((int) elapsed)
+                    .build();
+        } catch (RuntimeException e) {
+            metrics.recordRagQuery("error", System.currentTimeMillis() - pipelineStart, 0);
+            throw e;
         }
-
-        long elapsed = System.currentTimeMillis() - pipelineStart;
-        log.info("[FullRagPipeline] 完成：question={}，elapsed={}ms，sources={}",
-                question.substring(0, Math.min(30, question.length())), elapsed, sources.size());
-
-        return RagResponse.builder()
-                .answer(answer)
-                .sources(sources)
-                .latencyMs((int) elapsed)
-                .build();
     }
 
     private String buildContext(List<HybridRetrieverService.ScoredChunk> chunks) {

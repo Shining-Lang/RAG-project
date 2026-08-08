@@ -69,12 +69,89 @@ curl -H "Authorization: Bearer $TOKEN" \
 - Java 21, Spring Boot 3.5
 - Spring AI, LangChain4j
 - PostgreSQL, pgvector, GIN, HNSW
-- Redis, MinIO
+- Redis, MinIO, Kafka
 - Apache PDFBox, Apache POI, flexmark
 - Sa-Token, Actuator, Prometheus Metrics
+
+## Kafka 索引任务队列
+
+Kafka 是可选能力，当前本地演示配置默认开启：`index.kafka.enabled=${INDEX_KAFKA_ENABLED:true}`。
+如果需要关闭 Kafka，可设置 `INDEX_KAFKA_ENABLED=false`，索引任务会回退到原来的 `@Async` 本地线程池。
+开启 Kafka 后，文档上传/重建会先写入 `kb_index_task`，再向 Kafka 投递轻量任务消息，
+由消费者拉取消息后执行 MinIO 下载、解析、分块、向量化和 chunk 落库。
+
+```bash
+set INDEX_KAFKA_ENABLED=true
+set KAFKA_BOOTSTRAP_SERVERS=localhost:9092
+set INDEX_KAFKA_TOPIC=rag-index-task
+mvn spring-boot:run
+```
+
+消息链路：
+
+```text
+Upload/Reindex -> kb_index_task(PENDING) -> Kafka topic rag-index-task
+              -> KafkaIndexTaskConsumer -> MinIO download -> parse/chunk/embed/write chunks
+              -> kb_index_task(DONE/FAILED) + kb_document status update
+```
+
+目前只有 MinIO 文档任务会进入 Kafka。测试/初始化用的纯文本任务仍保留本地异步执行，
+因为文本内容只在内存中，不适合放进 Kafka 形成大消息。
 
 ## 简历表述参考
 
 - 构建企业级 RAG + Tool-Calling Sales Copilot，融合文档知识库检索与结构化销售数据分析，支持 LangChain4j function calling、RRF 混合检索、reranker 精排和 SSE 流式输出。
 - 设计销售 Agent 工具层，将订单查询、业绩排行、趋势分析、异常检测、知识库检索和 ECharts 图表生成封装为可调用工具，并加入参数校验、调用日志和失败降级机制。
 - 实现多格式文档索引管道，支持 MD/TXT/DOCX/PDF 解析、结构感知分块、向量化、HNSW 向量召回、GIN 全文召回和增量重建索引。
+
+## Frontend Console
+
+项目内置了一个融合 RAG 知识库前端与销售 Agent 前端思路后的统一前端控制台，位于 `frontend/`。
+它不是简单复制两套前端，而是用 React + Vite + Ant Design 做成一个演示入口，覆盖知识库管理、文档上传/重建、RAG 问答、Sales Agent 对话、销售工具快照和监控入口。
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+- Frontend: http://localhost:5173
+- Backend proxy: http://localhost:8080
+- Demo login: `admin / demo123`
+
+生产构建：
+
+```bash
+cd frontend
+npm run build
+```
+
+## Observability and Load Test
+
+The project includes a local observability stack and reproducible k6 scripts for interview/demo evidence.
+
+```bash
+docker compose -f docker-compose.observability.yml up -d
+```
+
+- Prometheus: http://localhost:9090
+- Grafana: http://localhost:3000
+- Prometheus scrape target: `host.docker.internal:8080/actuator/prometheus`
+- Grafana dashboard: `ops/grafana/dashboards/lsn-rag-agent-dashboard.json`
+
+Run k6 scripts:
+
+```bash
+k6 run -e BASE_URL=http://localhost:8080 -e KB_IDS=1 tools/k6/rag-query-load.js
+k6 run -e BASE_URL=http://localhost:8080 -e KB_IDS=1 tools/k6/sales-agent-load.js
+```
+
+Custom metrics:
+
+- `rag_query_total`, `rag_query_latency_seconds`, `rag_query_sources`
+- `sales_agent_chat_total`, `sales_agent_chat_latency_seconds`
+- `rag_index_task_submitted_total`, `rag_index_task_finished_total`
+- `rag_index_kafka_consume_total`
+- `rag_tokens_embedding_total`, `rag_tokens_context_total`, `rag_tokens_generation_total`
+
+See `docs/performance/README.md` and `docs/performance/load-test-report-template.md` for the evidence workflow. Current scope is local reproducible load testing and observability; it is not a production pressure-test claim.

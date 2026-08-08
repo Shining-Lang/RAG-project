@@ -34,6 +34,21 @@ spring:
           max-idle: 8
           min-idle: 2
 
+  # ========== Kafka ==========
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    consumer:
+      group-id: ${KAFKA_CONSUMER_GROUP:lsn-rag-kb-indexer}
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    listener:
+      ack-mode: manual
+
   # ========== 异步任务线程池 ==========
   task:
     execution:
@@ -91,6 +106,12 @@ sales-agent:
   cache:
     enabled: true
     ttl-seconds: 300
+
+index:
+  kafka:
+    enabled: ${INDEX_KAFKA_ENABLED:true}
+    topic: ${INDEX_KAFKA_TOPIC:rag-index-task}
+    concurrency: ${INDEX_KAFKA_CONCURRENCY:3}
 
 # ========== MinIO ==========
 minio:
