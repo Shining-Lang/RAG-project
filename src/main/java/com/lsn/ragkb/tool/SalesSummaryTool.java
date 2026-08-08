@@ -2,6 +2,7 @@ package com.lsn.ragkb.tool;
 
 import com.lsn.ragkb.security.ToolInputValidator;
 import com.lsn.ragkb.service.sales.SalesAnalyticsService;
+import com.lsn.ragkb.service.sales.SalesToolCacheService;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import lombok.RequiredArgsConstructor;
@@ -17,6 +18,7 @@ public class SalesSummaryTool {
 
     private final SalesAnalyticsService analyticsService;
     private final ToolInputValidator validator;
+    private final SalesToolCacheService cacheService;
 
     @Tool("计算指定时间段的总销售额、订单数等汇总数据。适用于：总销售额、本月/本季/今年收入、某大区整体业绩。")
     public String getSalesSummary(
@@ -29,7 +31,9 @@ public class SalesSummaryTool {
             LocalDate end = validator.parseDate(endDate);
             validator.validateDateRange(start, end);
             Long regionId = resolveRegionId(regionName);
-            return analyticsService.formatSalesSummary(regionId, start, end);
+            return cacheService.getOrCompute("summary",
+                    () -> analyticsService.formatSalesSummary(regionId, start, end),
+                    regionId, start, end);
         } catch (IllegalArgumentException e) {
             return e.getMessage();
         } catch (Exception e) {
@@ -51,7 +55,10 @@ public class SalesSummaryTool {
             LocalDate end = validator.parseDate(endDate);
             validator.validateDateRange(start, end);
             Long regionId = resolveRegionId(regionName);
-            return analyticsService.formatRepRanking(start, end, validator.normalizeTopN(topN), regionId);
+            int normalizedTopN = validator.normalizeTopN(topN);
+            return cacheService.getOrCompute("top-reps",
+                    () -> analyticsService.formatRepRanking(start, end, normalizedTopN, regionId),
+                    start, end, normalizedTopN, regionId);
         } catch (IllegalArgumentException e) {
             return e.getMessage();
         } catch (Exception e) {
@@ -69,7 +76,9 @@ public class SalesSummaryTool {
             LocalDate start = validator.parseDate(startDate);
             LocalDate end = validator.parseDate(endDate);
             validator.validateDateRange(start, end);
-            return analyticsService.formatRegionRanking(start, end);
+            return cacheService.getOrCompute("region-ranking",
+                    () -> analyticsService.formatRegionRanking(start, end),
+                    start, end);
         } catch (IllegalArgumentException e) {
             return e.getMessage();
         } catch (Exception e) {
@@ -89,7 +98,9 @@ public class SalesSummaryTool {
             LocalDate end = validator.parseDate(endDate);
             validator.validateDateRange(start, end);
             int signedTopN = validator.normalizeSignedTopN(topN);
-            return analyticsService.formatProductRanking(start, end, Math.abs(signedTopN), signedTopN < 0);
+            return cacheService.getOrCompute("top-products",
+                    () -> analyticsService.formatProductRanking(start, end, Math.abs(signedTopN), signedTopN < 0),
+                    start, end, signedTopN);
         } catch (IllegalArgumentException e) {
             return e.getMessage();
         } catch (Exception e) {

@@ -87,6 +87,11 @@ langchain4j:
       temperature: 0.1
       max-tokens: 2048
 
+sales-agent:
+  cache:
+    enabled: true
+    ttl-seconds: 300
+
 # ========== MinIO ==========
 minio:
   endpoint: ${MINIO_ENDPOINT:http://localhost:9000}

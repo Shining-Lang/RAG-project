@@ -9,6 +9,7 @@ import java.util.List;
 @Data
 @Builder
 public class SalesAgentResponse {
+    private String sessionId;
     private String answer;
     private String route;
     private String salesContext;

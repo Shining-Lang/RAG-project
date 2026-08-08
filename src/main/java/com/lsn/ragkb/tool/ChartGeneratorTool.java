@@ -7,6 +7,7 @@ import com.lsn.ragkb.dto.sales.RegionSalesDTO;
 import com.lsn.ragkb.dto.sales.RepSalesDTO;
 import com.lsn.ragkb.security.ToolInputValidator;
 import com.lsn.ragkb.service.sales.SalesAnalyticsService;
+import com.lsn.ragkb.service.sales.SalesToolCacheService;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import lombok.RequiredArgsConstructor;
@@ -27,6 +28,7 @@ public class ChartGeneratorTool {
     private final SalesAnalyticsService analyticsService;
     private final ToolInputValidator validator;
     private final ObjectMapper objectMapper;
+    private final SalesToolCacheService cacheService;
 
     @Tool("生成销售趋势折线图的 ECharts JSON。适用于：折线图、趋势图、月度变化图。")
     public String generateLineChart(
@@ -37,25 +39,10 @@ public class ChartGeneratorTool {
         try {
             int normalizedMonths = validator.normalizeMonths(months);
             Long regionId = resolveRegionId(regionName);
-            LocalDate end = LocalDate.now();
-            LocalDate start = end.minusMonths(normalizedMonths).withDayOfMonth(1);
-            List<MonthlyTrendDTO> data = analyticsService.queryMonthlyTrend(regionId, start, end);
-            if (data.isEmpty()) {
-                return "暂无数据，无法生成图表。";
-            }
-            Map<String, Object> option = new LinkedHashMap<>();
-            option.put("title", Map.of("text", blankToDefault(title, "销售趋势")));
-            option.put("tooltip", Map.of("trigger", "axis"));
-            option.put("xAxis", Map.of("type", "category", "data", data.stream().map(MonthlyTrendDTO::month).toList()));
-            option.put("yAxis", Map.of("type", "value", "name", "销售额（元）"));
-            option.put("series", List.of(Map.of(
-                    "type", "line",
-                    "smooth", true,
-                    "name", "销售额",
-                    "data", data.stream().map(d -> d.totalAmount().longValue()).toList(),
-                    "itemStyle", Map.of("color", "#5470c6")
-            )));
-            return "CHART_JSON:" + objectMapper.writeValueAsString(option);
+            String normalizedTitle = blankToDefault(title, "销售趋势");
+            return cacheService.getOrCompute("chart-line",
+                    () -> buildLineChart(normalizedMonths, regionId, normalizedTitle),
+                    normalizedMonths, regionId, normalizedTitle);
         } catch (IllegalArgumentException e) {
             return e.getMessage();
         } catch (Exception e) {
@@ -79,29 +66,10 @@ public class ChartGeneratorTool {
             LocalDate start = validator.parseDate(startDate);
             LocalDate end = validator.parseDate(endDate);
             validator.validateDateRange(start, end);
-
-            List<String> names;
-            List<Long> values;
-            if ("region".equals(dim)) {
-                List<RegionSalesDTO> regions = analyticsService.queryRegionRanking(start, end);
-                names = regions.stream().map(RegionSalesDTO::regionName).toList();
-                values = regions.stream().map(r -> r.totalAmount().longValue()).toList();
-            } else {
-                List<RepSalesDTO> reps = analyticsService.queryRepRanking(start, end).stream().limit(10).toList();
-                names = reps.stream().map(RepSalesDTO::repName).toList();
-                values = reps.stream().map(r -> r.totalAmount().longValue()).toList();
-            }
-            if (names.isEmpty()) {
-                return "暂无数据，无法生成图表。";
-            }
-            Map<String, Object> option = new LinkedHashMap<>();
-            option.put("title", Map.of("text", blankToDefault(title, "销售对比")));
-            option.put("tooltip", Map.of("trigger", "axis"));
-            option.put("xAxis", Map.of("type", "category", "data", names, "axisLabel", Map.of("rotate", 30)));
-            option.put("yAxis", Map.of("type", "value", "name", "销售额（元）"));
-            option.put("series", List.of(Map.of("type", "bar", "data", values,
-                    "itemStyle", Map.of("color", "#91cc75"))));
-            return "CHART_JSON:" + objectMapper.writeValueAsString(option);
+            String normalizedTitle = blankToDefault(title, "销售对比");
+            return cacheService.getOrCompute("chart-bar",
+                    () -> buildBarChart(dim, start, end, normalizedTitle),
+                    dim, start, end, normalizedTitle);
         } catch (IllegalArgumentException e) {
             return e.getMessage();
         } catch (Exception e) {
@@ -125,40 +93,89 @@ public class ChartGeneratorTool {
             LocalDate start = validator.parseDate(startDate);
             LocalDate end = validator.parseDate(endDate);
             validator.validateDateRange(start, end);
-
-            List<Map<String, Object>> data;
-            if ("region".equals(dim)) {
-                data = analyticsService.queryRegionRanking(start, end).stream()
-                        .map(r -> pieItem(r.regionName(), r.totalAmount()))
-                        .toList();
-            } else {
-                Map<String, BigDecimal> categoryMap = new LinkedHashMap<>();
-                for (ProductSalesDTO product : analyticsService.queryProductRanking(start, end)) {
-                    categoryMap.merge(product.category(), product.totalAmount(), BigDecimal::add);
-                }
-                data = categoryMap.entrySet().stream()
-                        .map(e -> pieItem(e.getKey(), e.getValue()))
-                        .toList();
-            }
-            if (data.isEmpty()) {
-                return "暂无数据，无法生成图表。";
-            }
-            Map<String, Object> option = new LinkedHashMap<>();
-            option.put("title", Map.of("text", blankToDefault(title, "销售占比"), "left", "center"));
-            option.put("tooltip", Map.of("trigger", "item", "formatter", "{b}: {c} ({d}%)"));
-            option.put("legend", Map.of("orient", "vertical", "left", "left"));
-            option.put("series", List.of(Map.of(
-                    "type", "pie",
-                    "radius", "55%",
-                    "data", data
-            )));
-            return "CHART_JSON:" + objectMapper.writeValueAsString(option);
+            String normalizedTitle = blankToDefault(title, "销售占比");
+            return cacheService.getOrCompute("chart-pie",
+                    () -> buildPieChart(dim, start, end, normalizedTitle),
+                    dim, start, end, normalizedTitle);
         } catch (IllegalArgumentException e) {
             return e.getMessage();
         } catch (Exception e) {
             log.error("[SalesTool] generatePieChart failed", e);
             return "生成饼图数据时出现问题，请稍后重试。";
         }
+    }
+
+    private String buildLineChart(int months, Long regionId, String title) {
+        LocalDate end = LocalDate.now();
+        LocalDate start = end.minusMonths(months).withDayOfMonth(1);
+        List<MonthlyTrendDTO> data = analyticsService.queryMonthlyTrend(regionId, start, end);
+        if (data.isEmpty()) {
+            return "暂无数据，无法生成图表。";
+        }
+        Map<String, Object> option = new LinkedHashMap<>();
+        option.put("title", Map.of("text", title));
+        option.put("tooltip", Map.of("trigger", "axis"));
+        option.put("xAxis", Map.of("type", "category", "data", data.stream().map(MonthlyTrendDTO::month).toList()));
+        option.put("yAxis", Map.of("type", "value", "name", "销售额（元）"));
+        option.put("series", List.of(Map.of(
+                "type", "line",
+                "smooth", true,
+                "name", "销售额",
+                "data", data.stream().map(d -> d.totalAmount().longValue()).toList(),
+                "itemStyle", Map.of("color", "#5470c6")
+        )));
+        return chartJson(option);
+    }
+
+    private String buildBarChart(String dimension, LocalDate start, LocalDate end, String title) {
+        List<String> names;
+        List<Long> values;
+        if ("region".equals(dimension)) {
+            List<RegionSalesDTO> regions = analyticsService.queryRegionRanking(start, end);
+            names = regions.stream().map(RegionSalesDTO::regionName).toList();
+            values = regions.stream().map(r -> r.totalAmount().longValue()).toList();
+        } else {
+            List<RepSalesDTO> reps = analyticsService.queryRepRanking(start, end).stream().limit(10).toList();
+            names = reps.stream().map(RepSalesDTO::repName).toList();
+            values = reps.stream().map(r -> r.totalAmount().longValue()).toList();
+        }
+        if (names.isEmpty()) {
+            return "暂无数据，无法生成图表。";
+        }
+        Map<String, Object> option = new LinkedHashMap<>();
+        option.put("title", Map.of("text", title));
+        option.put("tooltip", Map.of("trigger", "axis"));
+        option.put("xAxis", Map.of("type", "category", "data", names, "axisLabel", Map.of("rotate", 30)));
+        option.put("yAxis", Map.of("type", "value", "name", "销售额（元）"));
+        option.put("series", List.of(Map.of("type", "bar", "data", values,
+                "itemStyle", Map.of("color", "#91cc75"))));
+        return chartJson(option);
+    }
+
+    private String buildPieChart(String dimension, LocalDate start, LocalDate end, String title) {
+        List<Map<String, Object>> data;
+        if ("region".equals(dimension)) {
+            data = analyticsService.queryRegionRanking(start, end).stream()
+                    .map(r -> pieItem(r.regionName(), r.totalAmount()))
+                    .toList();
+        } else {
+            Map<String, BigDecimal> categoryMap = new LinkedHashMap<>();
+            for (ProductSalesDTO product : analyticsService.queryProductRanking(start, end)) {
+                categoryMap.merge(product.category(), product.totalAmount(), BigDecimal::add);
+            }
+            data = categoryMap.entrySet().stream()
+                    .map(e -> pieItem(e.getKey(), e.getValue()))
+                    .toList();
+        }
+        if (data.isEmpty()) {
+            return "暂无数据，无法生成图表。";
+        }
+        Map<String, Object> option = new LinkedHashMap<>();
+        option.put("title", Map.of("text", title, "left", "center"));
+        option.put("tooltip", Map.of("trigger", "item", "formatter", "{b}: {c} ({d}%)"));
+        option.put("legend", Map.of("orient", "vertical", "left", "left"));
+        option.put("series", List.of(Map.of("type", "pie", "radius", "55%", "data", data)));
+        return chartJson(option);
     }
 
     private Long resolveRegionId(String regionName) {
@@ -179,5 +196,13 @@ public class ChartGeneratorTool {
 
     private String blankToDefault(String value, String fallback) {
         return value == null || value.isBlank() ? fallback : value;
+    }
+
+    private String chartJson(Map<String, Object> option) {
+        try {
+            return "CHART_JSON:" + objectMapper.writeValueAsString(option);
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to serialize chart option", e);
+        }
     }
 }

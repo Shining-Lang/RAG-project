@@ -7,6 +7,7 @@ import com.lsn.ragkb.tool.KnowledgeRetrievalTool;
 import com.lsn.ragkb.tool.SalesQueryTool;
 import com.lsn.ragkb.tool.SalesSummaryTool;
 import com.lsn.ragkb.tool.SalesTrendTool;
+import com.lsn.ragkb.service.sales.PersistentChatMemoryStore;
 import com.lsn.ragkb.service.sales.SalesAgentRequestContext;
 import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import dev.langchain4j.model.chat.ChatModel;
@@ -31,6 +32,7 @@ public class LangChain4jSalesAgentConfig {
     private final ChartGeneratorTool chartGeneratorTool;
     private final KnowledgeRetrievalTool knowledgeRetrievalTool;
     private final SalesAgentRequestContext requestContext;
+    private final PersistentChatMemoryStore persistentChatMemoryStore;
 
     @Bean
     public SalesAgent salesAgent() {
@@ -57,6 +59,7 @@ public class LangChain4jSalesAgentConfig {
                 .chatMemoryProvider(memoryId -> MessageWindowChatMemory.builder()
                         .id(memoryId)
                         .maxMessages(20)
+                        .chatMemoryStore(persistentChatMemoryStore)
                         .build())
                 .build();
     }

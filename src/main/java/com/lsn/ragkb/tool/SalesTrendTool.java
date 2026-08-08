@@ -2,6 +2,7 @@ package com.lsn.ragkb.tool;
 
 import com.lsn.ragkb.security.ToolInputValidator;
 import com.lsn.ragkb.service.sales.SalesAnalyticsService;
+import com.lsn.ragkb.service.sales.SalesToolCacheService;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import lombok.RequiredArgsConstructor;
@@ -18,6 +19,7 @@ public class SalesTrendTool {
 
     private final SalesAnalyticsService analyticsService;
     private final ToolInputValidator validator;
+    private final SalesToolCacheService cacheService;
 
     @Tool("计算销售环比增长率，即当前周期与上一周期对比。适用于：本月比上月、本季比上季、最近两期对比。")
     public String calcPeriodOverPeriod(
@@ -46,8 +48,11 @@ public class SalesTrendTool {
                 validator.validateDateRange(pStart, pEnd);
             }
 
-            return analyticsService.formatGrowthComparison(cStart, cEnd, pStart, pEnd,
-                    resolveRegionId(regionName), "环比分析");
+            Long regionId = resolveRegionId(regionName);
+            return cacheService.getOrCompute("period-over-period",
+                    () -> analyticsService.formatGrowthComparison(cStart, cEnd, pStart, pEnd,
+                            regionId, "环比分析"),
+                    cStart, cEnd, pStart, pEnd, regionId);
         } catch (IllegalArgumentException e) {
             return e.getMessage();
         } catch (Exception e) {
@@ -66,8 +71,11 @@ public class SalesTrendTool {
             LocalDate start = validator.parseDate(startDate);
             LocalDate end = validator.parseDate(endDate);
             validator.validateDateRange(start, end);
-            return analyticsService.formatGrowthComparison(start, end, start.minusYears(1), end.minusYears(1),
-                    resolveRegionId(regionName), "同比分析");
+            Long regionId = resolveRegionId(regionName);
+            return cacheService.getOrCompute("year-over-year",
+                    () -> analyticsService.formatGrowthComparison(start, end, start.minusYears(1), end.minusYears(1),
+                            regionId, "同比分析"),
+                    start, end, regionId);
         } catch (IllegalArgumentException e) {
             return e.getMessage();
         } catch (Exception e) {
@@ -82,7 +90,11 @@ public class SalesTrendTool {
             @P("大区名称，例如：华东区。传 null 表示全公司") String regionName) {
         log.info("[SalesTool] getMonthlyTrend months={}, region={}", months, regionName);
         try {
-            return analyticsService.formatMonthlyTrend(resolveRegionId(regionName), validator.normalizeMonths(months));
+            int normalizedMonths = validator.normalizeMonths(months);
+            Long regionId = resolveRegionId(regionName);
+            return cacheService.getOrCompute("monthly-trend",
+                    () -> analyticsService.formatMonthlyTrend(regionId, normalizedMonths),
+                    regionId, normalizedMonths);
         } catch (IllegalArgumentException e) {
             return e.getMessage();
         } catch (Exception e) {

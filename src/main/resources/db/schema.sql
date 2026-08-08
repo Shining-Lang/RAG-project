@@ -275,3 +275,20 @@ CREATE INDEX IF NOT EXISTS idx_sa_order_product ON sa_sales_order(product_id);
 CREATE INDEX IF NOT EXISTS idx_sa_order_region ON sa_sales_order(region_id);
 CREATE INDEX IF NOT EXISTS idx_sa_order_date ON sa_sales_order(order_date);
 CREATE INDEX IF NOT EXISTS idx_sa_order_status ON sa_sales_order(status);
+
+-- ================================================================
+-- Agent memory table
+-- ================================================================
+CREATE TABLE IF NOT EXISTS kb_agent_memory (
+                                 memory_id      VARCHAR(160) PRIMARY KEY,
+                                 user_id        BIGINT       NOT NULL,
+                                 session_id     VARCHAR(128) NOT NULL,
+                                 messages_json  JSONB        NOT NULL,
+                                 message_count  INT          NOT NULL DEFAULT 0,
+                                 created_at     TIMESTAMP    NOT NULL DEFAULT NOW(),
+                                 updated_at     TIMESTAMP    NOT NULL DEFAULT NOW()
+);
+
+COMMENT ON TABLE kb_agent_memory IS 'LangChain4j Agent persistent chat memory, keyed by userId:sessionId';
+CREATE INDEX IF NOT EXISTS idx_agent_memory_user_session ON kb_agent_memory(user_id, session_id);
+CREATE INDEX IF NOT EXISTS idx_agent_memory_updated_at ON kb_agent_memory(updated_at DESC);
