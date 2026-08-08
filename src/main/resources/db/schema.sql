@@ -216,3 +216,62 @@ CREATE TABLE IF NOT EXISTS kb_eval_result (
                                 answer_relevancy FLOAT,                            -- RAGAS Answer Relevancy 分数
                                 eval_at         TIMESTAMP       NOT NULL DEFAULT NOW()
 );
+
+-- ================================================================
+-- 10. Sales Agent business tables
+-- ================================================================
+CREATE TABLE IF NOT EXISTS sa_sales_region (
+                                 id               BIGSERIAL PRIMARY KEY,
+                                 name             VARCHAR(50) NOT NULL UNIQUE,
+                                 parent_region_id BIGINT,
+                                 created_at       TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS sa_sales_rep (
+                              id         BIGSERIAL PRIMARY KEY,
+                              name       VARCHAR(50) NOT NULL,
+                              region_id  BIGINT NOT NULL,
+                              role       VARCHAR(20) NOT NULL DEFAULT 'SALES_REP',
+                              email      VARCHAR(100),
+                              created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_sa_rep_region ON sa_sales_rep(region_id);
+CREATE INDEX IF NOT EXISTS idx_sa_rep_role ON sa_sales_rep(role);
+
+CREATE TABLE IF NOT EXISTS sa_product (
+                            id         BIGSERIAL PRIMARY KEY,
+                            sku_code   VARCHAR(50) NOT NULL UNIQUE,
+                            name       VARCHAR(200) NOT NULL,
+                            category   VARCHAR(50) NOT NULL,
+                            unit_price NUMERIC(10, 2) NOT NULL,
+                            cost       NUMERIC(10, 2) NOT NULL,
+                            status     VARCHAR(20) NOT NULL DEFAULT 'ACTIVE',
+                            created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_sa_product_category ON sa_product(category);
+CREATE INDEX IF NOT EXISTS idx_sa_product_status ON sa_product(status);
+
+CREATE TABLE IF NOT EXISTS sa_sales_order (
+                                 id            BIGSERIAL PRIMARY KEY,
+                                 order_no      VARCHAR(50) NOT NULL UNIQUE,
+                                 rep_id        BIGINT NOT NULL,
+                                 product_id    BIGINT NOT NULL,
+                                 region_id     BIGINT NOT NULL,
+                                 customer_name VARCHAR(100) NOT NULL,
+                                 quantity      INT NOT NULL,
+                                 unit_price    NUMERIC(10, 2) NOT NULL,
+                                 amount        NUMERIC(12, 2) NOT NULL,
+                                 cost          NUMERIC(12, 2) NOT NULL,
+                                 profit        NUMERIC(12, 2) NOT NULL,
+                                 status        VARCHAR(20) NOT NULL DEFAULT 'COMPLETED',
+                                 order_date    DATE NOT NULL,
+                                 created_at    TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_sa_order_rep ON sa_sales_order(rep_id);
+CREATE INDEX IF NOT EXISTS idx_sa_order_product ON sa_sales_order(product_id);
+CREATE INDEX IF NOT EXISTS idx_sa_order_region ON sa_sales_order(region_id);
+CREATE INDEX IF NOT EXISTS idx_sa_order_date ON sa_sales_order(order_date);
+CREATE INDEX IF NOT EXISTS idx_sa_order_status ON sa_sales_order(status);
